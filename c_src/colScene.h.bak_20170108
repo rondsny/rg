@@ -1,0 +1,32 @@
+#ifndef COLSCENE
+#define COLSCENE
+
+#include "btBulletDynamicsCommon.h"
+
+class colScene
+{
+    private:
+        btDefaultCollisionConfiguration* g_colConfig;
+        btCollisionDispatcher* g_dispatcher;
+        btBroadphaseInterface* g_broadInterface;
+        btSequentialImpulseConstraintSolver* g_solver;
+        btDynamicsWorld* g_world;  // 场景信息，退出的时候需要delete
+
+        void delete_col(btCollisionObject* obj);
+        // 删除所有胶囊体
+
+    protected:
+
+    public:
+        btVector3* g_colPos;       // 用于记录每次碰撞位置
+
+        colScene();
+        ~colScene();
+        btCollisionObject* createCapsule(btVector3 posA, btVector3 posB, double radius);
+        btCollisionObject* createCapsule2(double radius, btScalar height, btVector3 pos, btQuaternion rot);
+        int checkPos(btCollisionObject* obj);
+        int checkAllPos();
+        void removeAllCapsule();
+};
+
+#endif

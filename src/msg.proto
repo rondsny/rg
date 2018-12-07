@@ -1,0 +1,52 @@
+message Person
+{
+    required string name = 1;
+    required string address = 2;
+    required string phone_number = 3;
+    required int32 age = 4;
+    optional Location location = 5;
+}
+
+message Location
+{
+    required string region = 1;
+    required string country = 2;
+}
+
+// -- 测试协议
+
+// @doc 客户端 登录
+message c_login
+{
+    required string username = 1;
+    required string password = 2;
+}
+
+// @doc 服务端 登录返回
+message s_login
+{
+    required uint32 code = 1;
+    optional string msg = 2;
+    optional p_user_info info = 3;
+}
+
+// @doc 服务端 用户信息列表
+message c_user_list
+{
+    optional uint32 type = 1;
+}
+
+// @doc 服务端 用户信息列表
+message s_user_list
+{
+    repeated p_user_info list = 1;
+}
+
+// @doc 用户信息
+message p_user_info
+{
+    required uint32 id = 1;
+    required uint32 state = 2;      // 0-离线 2-正常在线
+    required string username = 3;
+    required string nickname = 4;
+}

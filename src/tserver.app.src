@@ -1,0 +1,13 @@
+{application, tserver, [
+    {description, "Ron's Erlang Server."},
+    {vsn, "1"},
+    {modules, []},
+    {registered, [tserver_sup]},
+    {applications, [
+        kernel,
+        stdlib,
+        ranch
+    ]},
+    {mod, {tserver_app, []}},
+    {env, []}
+]}.

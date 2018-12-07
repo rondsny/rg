@@ -1,0 +1,350 @@
+#include <stdio.h>
+#include <list>
+#include <math.h>
+#include "erl_nif.h"
+#include "btBulletDynamicsCommon.h"
+#include "landscapeData.h" // 三角网格数据
+
+using namespace std;
+
+// 全局变量
+// 以下对象退出时需要delete
+btDefaultCollisionConfiguration* g_colConfig;
+btCollisionDispatcher* g_dispatcher;
+btBroadphaseInterface* g_broadInterface;
+btSequentialImpulseConstraintSolver* g_solver;
+btDynamicsWorld* g_world;  // 场景信息，退出的时候需要delete
+
+btVector3* g_colPos; // 用于记录每次碰撞位置
+btRigidBody* g_body;   // 胶囊体
+
+// ---------------------------
+
+static int load(ErlNifEnv* env, void** priv, ERL_NIF_TERM load_info)
+{
+    return 0;
+}
+
+static int upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ERL_NIF_TERM load_info)
+{
+    return 0;
+}
+
+// 初始化地形场景
+// @return 返回ok
+static ERL_NIF_TERM open_scene(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    int LandscapeVtxCount[] = {
+        Landscape01VtxCount,
+        Landscape02VtxCount,
+        Landscape03VtxCount,
+        Landscape04VtxCount,
+        Landscape05VtxCount,
+        Landscape06VtxCount,
+        Landscape07VtxCount,
+        Landscape08VtxCount,
+    };
+
+    int LandscapeIdxCount[] = {
+        Landscape01IdxCount,
+        Landscape02IdxCount,
+        Landscape03IdxCount,
+        Landscape04IdxCount,
+        Landscape05IdxCount,
+        Landscape06IdxCount,
+        Landscape07IdxCount,
+        Landscape08IdxCount,
+    };
+
+    btScalar *LandscapeVtx[] = {
+        Landscape01Vtx,
+        Landscape02Vtx,
+        Landscape03Vtx,
+        Landscape04Vtx,
+        Landscape05Vtx,
+        Landscape06Vtx,
+        Landscape07Vtx,
+        Landscape08Vtx,
+    };
+
+    unsigned short  *LandscapeIdx[] = {
+        Landscape01Idx,
+        Landscape02Idx,
+        Landscape03Idx,
+        Landscape04Idx,
+        Landscape05Idx,
+        Landscape06Idx,
+        Landscape07Idx,
+        Landscape08Idx,
+    };
+
+    g_colPos = new btVector3();
+
+    g_colConfig = new btDefaultCollisionConfiguration();
+    g_dispatcher = new btCollisionDispatcher(g_colConfig);
+    g_broadInterface = new btDbvtBroadphase();
+    g_solver = new btSequentialImpulseConstraintSolver;
+    g_world = new btDiscreteDynamicsWorld(g_dispatcher, g_broadInterface, g_solver, g_colConfig);
+
+    g_world->setGravity(btVector3(0, -10, 0)); // 设置重力
+
+    btTransform trans;
+    trans.setIdentity();
+
+    for(int i=0;i<8;i++) {
+        btTriangleIndexVertexArray* meshInterface = new btTriangleIndexVertexArray();
+        btIndexedMesh part;
+
+        part.m_vertexBase = (const unsigned char*)LandscapeVtx[i];
+        part.m_vertexStride = sizeof(btScalar) * 3;
+        part.m_numVertices = LandscapeVtxCount[i];
+        part.m_triangleIndexBase = (const unsigned char*)LandscapeIdx[i];
+        part.m_triangleIndexStride = sizeof( short) * 3;
+        part.m_numTriangles = LandscapeIdxCount[i]/3;
+        part.m_indexType = PHY_SHORT;
+
+        meshInterface->addIndexedMesh(part,PHY_SHORT);
+
+        bool useQuantizedAabbCompression = true;
+        btBvhTriangleMeshShape* trimeshShape = new btBvhTriangleMeshShape(meshInterface,useQuantizedAabbCompression);
+        trans.setOrigin(btVector3(0,-25,0));
+
+        btScalar mass(0.f);
+        btVector3 localInertia(0,0,0);
+        bool isDynamic = (mass != 0.f);
+        if (isDynamic)
+            trimeshShape->calculateLocalInertia(mass, localInertia);
+
+        btDefaultMotionState* myMotionState = new btDefaultMotionState(trans);
+        btRigidBody::btRigidBodyConstructionInfo rbInfo(mass,myMotionState,trimeshShape,localInertia);
+        btRigidBody* body = new btRigidBody(rbInfo);
+
+        g_world->addRigidBody(body);
+    }
+
+    // 创建胶囊体并加入到场景中
+    createCapsule(btVector3(0,0,0), btVector3(0,0,0), 0.f);
+    return enif_make_atom(env, "ok");
+}
+
+
+// 删除物体
+static void delete_col(btCollisionObject* obj)
+{
+    btRigidBody* body = btRigidBody::upcast(obj);
+    if (body && body->getMotionState())
+    {
+        delete body->getMotionState();
+        delete body->getCollisionShape();
+    }
+    g_world->removeCollisionObject(obj);
+    delete obj;
+}
+
+// 删除资源
+// @return 返回ok
+static ERL_NIF_TERM close_scene(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    for (int i = 0; i < g_world->getNumCollisionObjects(); ++i)
+    {
+        btCollisionObject* obj = g_world->getCollisionObjectArray()[i];
+        delete_col(obj);
+    }
+    delete g_world;
+    delete g_solver;
+    delete g_broadInterface;
+    delete g_dispatcher;
+    delete g_colConfig;
+    delete g_colPos;
+    return enif_make_atom(env, "ok");
+}
+
+
+static int get_number_f(ErlNifEnv *env, ERL_NIF_TERM eterm, double *f)
+{
+    if (enif_get_double(env, eterm, f)) {
+        return 1;
+    }
+    else {
+        long n;
+        if (enif_get_long(env, eterm, &n)){
+            *f = (double)n;
+            return 1;
+        }
+        else {
+            return 0;
+        }
+    }
+}
+
+static int get_vector3(ErlNifEnv *env, ERL_NIF_TERM eterm, btVector3 *vector)
+{
+    double x,y,z;
+    int arity;
+    const ERL_NIF_TERM *array;
+    if (enif_get_tuple(env, eterm, &arity, &array)
+        && 3 == arity
+        && get_number_f(env, array[0], &x)
+        && get_number_f(env, array[1], &y)
+        && get_number_f(env, array[2], &z)) {
+
+        vector->setX((btScalar)x);
+        vector->setY((btScalar)y);
+        vector->setZ((btScalar)z);
+
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+
+// 创建一个胶囊体
+static void createCapsule(btVector3 posA, btVector3 posB, double radius)
+{
+    btScalar lenX = posB.getX() - posA.getX();
+    btScalar lenY = posB.getY() - posA.getY();
+    btScalar lenZ = posB.getZ() - posA.getZ();
+    btScalar height = sqrt(lenX*lenX + lenY*lenY + lenZ*lenZ);
+    btCapsuleShape* shape = new btCapsuleShape((btScalar)radius, height);
+    btTransform trans;
+    trans.setIdentity();
+    trans.setOrigin(btVector3((posA.getX()+posB.getX())/2, (posA.getY()+posB.getY())/2, (posA.getZ()+posB.getZ())/2));
+
+    btScalar mass=1.f;
+    btVector3 localInertia(0, 0, 0);
+    bool isDynamic = (mass != 0.f);
+    if (isDynamic)
+        shape->calculateLocalInertia(mass, localInertia);
+
+    btDefaultMotionState* myMotionState = new btDefaultMotionState(trans);
+    btRigidBody::btRigidBodyConstructionInfo cInfo(mass, myMotionState, shape, localInertia);
+    g_body = new btRigidBody(cInfo);
+    g_world->addRigidBody(g_body);
+}
+
+// 删除所有胶囊体
+static void removeAllCapsule()
+{
+    btAlignedObjectArray<btCollisionObject*> objs = g_world->getCollisionObjectArray();
+    for (int i = 0; i < objs.size(); ++i)
+    {
+        if(objs[i]->getCollisionShape()->getShapeType()==CAPSULE_SHAPE_PROXYTYPE)
+        {
+            g_world->removeCollisionObject(objs[i]);
+        }
+    }
+
+}
+
+// 检查碰撞的胶囊体，并且返回最后一个胶囊体
+static int checkPos(btVector3* colPos)
+{
+    g_world->performDiscreteCollisionDetection();
+    // g_world->stepSimulation(1.f/60.f);
+
+    int is_col = 0;
+    list<btCollisionObject*> m_collisionObjects;
+    int numManifolds = g_world->getDispatcher()->getNumManifolds();
+
+    for(int i=0; i<numManifolds; i++)
+    {
+        btPersistentManifold* contactManifold =  g_world->getDispatcher()->getManifoldByIndexInternal(i);
+        btCollisionObject* obA = (btCollisionObject*)(contactManifold->getBody0());
+        btCollisionObject* obB = (btCollisionObject*)(contactManifold->getBody1());
+
+        int numContacts = contactManifold->getNumContacts();
+        for(int j=0; j<numContacts; j++)
+        {
+            btManifoldPoint& pt = contactManifold->getContactPoint(j);
+            if(pt.getDistance()<0.f )
+            {
+                m_collisionObjects.push_back(obA);
+                m_collisionObjects.push_back(obB);
+            }
+        }
+    }
+
+    if(m_collisionObjects.size()>0)
+    {
+        m_collisionObjects.sort();
+        m_collisionObjects.unique();
+        for(list<btCollisionObject*>::iterator itr = m_collisionObjects.begin(); itr != m_collisionObjects.end(); ++itr) {
+            btCollisionObject* colObj = *itr;
+
+            if(colObj->getCollisionShape()->getShapeType()==CAPSULE_SHAPE_PROXYTYPE) // 如果是胶囊体刚体
+            {
+                btTransform trans = colObj->getWorldTransform();
+                colPos->setX(trans.getOrigin().getX()),
+                colPos->setY(trans.getOrigin().getY()),
+                colPos->setZ(trans.getOrigin().getZ()),
+                is_col = 1;
+            }
+        }
+        m_collisionObjects.clear();
+    }
+    removeAllCapsule();
+    return is_col;
+}
+
+
+// 碰撞检测
+// @return 返回碰撞坐标 {1, {x,y,z}}| {0,{A.x, A.y, A.z}}
+static ERL_NIF_TERM col_check(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    int len1;
+    int len2;
+    btVector3 posA;
+    btVector3 posB;
+    if (!get_vector3(env, argv[0], &posA))
+        return enif_make_badarg(env);
+
+    else
+    {
+        if (!get_vector3(env, argv[1], &posB))
+            return enif_make_badarg(env);
+
+        else
+        {
+            double radius;
+            enif_get_double(env, argv[3], &radius);
+
+            // todo 修改胶囊体大小位置
+            changeCapsule(posA, posB, radius);
+
+            // 判断碰撞，返回碰撞点
+            int shapType = checkPos(g_colPos);
+            if(shapType>0)
+            {
+                ERL_NIF_TERM termPos = enif_make_tuple3(env,
+                    enif_make_double(env, g_colPos->getX()),
+                    enif_make_double(env, g_colPos->getY()),
+                    enif_make_double(env, g_colPos->getZ()));
+
+                ERL_NIF_TERM terms = enif_make_tuple2(env,
+                    enif_make_int(env, 1),
+                    termPos);
+                return terms;
+            }
+
+            ERL_NIF_TERM termA = enif_make_tuple3(env,
+                enif_make_double(env, posA.getX()),
+                enif_make_double(env, posA.getY()),
+                enif_make_double(env, posA.getZ()));
+
+            ERL_NIF_TERM terms = enif_make_tuple2(env, enif_make_int(env, 0), termA);
+            return terms;
+        }
+    }
+}
+
+
+static ErlNifFunc nif_funcs[] = {
+        {"open_scene", 0, open_scene},
+        {"close_scene", 0, close_scene},
+        {"col_check", 3, col_check}
+};
+
+
+ERL_NIF_INIT(t_bullet, nif_funcs, load, NULL, upgrade, NULL)
