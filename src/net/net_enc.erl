@@ -2,7 +2,7 @@
 % @Email:  rondsny@gmail.com
 % @Date:   2016-11-17 11:26:31
 % @Last Modified by:   weiyanguang
-% @Last Modified time: 2016-11-17 17:18:46
+% @Last Modified time: 2018-12-14 16:23:53
 % @Desc: net_encrypt encode/decode
 
 -module(net_enc).
@@ -18,7 +18,7 @@ encode(Rec) ->
         undef ->
             [];
         Code ->
-            Bin  = msg_pb:encode(Rec),
+            Bin  = msg:encode_msg(Rec),
             Len  = erlang:iolist_size(Bin) + 2,
             Bin3 = [<<Len:16, Code:16>>, Bin],
             ?TRAC_W(send_bin, Bin3),
@@ -27,16 +27,23 @@ encode(Rec) ->
 
 % @doc decode协议
 decode(<<Len0:16, Bin0:Len0/binary, _Res0/binary>>) -> %% 去掉头
-    <<Len:16, Bin:Len/binary, _Res1/binary>> = Bin0,
-    <<Code:16, Bin2/binary>> = Bin,
+    ?TRAC_W(Len0),
+    <<Code:16, Bin2/binary>> = Bin0,
+    ?TRAC_W(Code),
     case data_msg_code:get(Code) of
         undef ->
             false;
         Key ->
-            Rec = msg_pb:decode(Key, Bin2),
+            ?TRAC_W(Key),
+            Rec = msg:decode_msg(Bin2, Key),
             ?TRAC_W(Code, Rec),
             {true, Code, Rec}
-    end.
+    end;
+decode(<<Len0:16,Len2:16, _Res0/binary>>) -> %% 去掉头
+    ?TRAC_W(Len0),
+    ?TRAC_W(Len2),
+    ?TRAC_W(_Res0),
+    ok.
 
 
 % @doc decode协议(客户端)
@@ -46,7 +53,7 @@ decode_c(Bin) ->
         undef ->
             false;
         Key ->
-            Rec = msg_pb:decode(Key, Bin2),
+            Rec = msg:decode_msg(Bin2, Key),
             ?TRAC_W(Code, Rec),
             {true, Code, Rec}
     end.

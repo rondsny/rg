@@ -2,7 +2,7 @@
 % @Email:  rondsny@gmail.com
 % @Date:   2017-01-10 10:50:46
 % @Last Modified by:   weiyanguang
-% @Last Modified time: 2017-01-10 14:44:00
+% @Last Modified time: 2018-12-11 14:59:33
 % @Desc: 定时器
 
 -module(cm_timer).
@@ -89,6 +89,6 @@ loop(State) ->
     after
         1000 ->
             send_loop_msg,
-            ?TRAC_W(doloop, Loop),
+            ?TRAC_W(doloop, 1000),
             loop(State)
     end.

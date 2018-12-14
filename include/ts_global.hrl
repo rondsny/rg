@@ -1,4 +1,4 @@
--include("msg_pb.hrl").
+-include("msg.hrl").
 
 -define(true, true).
 -define(false, false).
